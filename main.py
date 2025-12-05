@@ -6,6 +6,12 @@ app = Flask(__name__)
 def hello_world():
     return "<p>Hello, World!</p>"
 
+if __name__ == '__main__':
+
+    # run() method of Flask class runs the application 
+    # on the local development server.
+    app.run()
+
 print("This is the GCSE and mock grade predictor.")
 print("It will ask for your previous grades from mocks and school reports in Year 10 and Year 11.")
 print("Just a reminder: nothing here is 100% accurate. It is merely a prediction.")
