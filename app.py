@@ -1,6 +1,8 @@
 from flask import Flask, jsonify, request, render_template_string
 from datetime import datetime
 from functools import wraps
+import json
+import os
 
 app = Flask(__name__)
 
@@ -8,12 +10,43 @@ app = Flask(__name__)
 students = {}
 student_id_counter = 1
 
-# GCSE grade boundaries and calculations
-GRADE_BOUNDARIES = {
+# Data file path
+DATA_FILE = 'students_data.json'
+
+# Default GCSE grade boundaries
+DEFAULT_GRADE_BOUNDARIES = {
     9: 90, 8: 80, 7: 70, 6: 60, 5: 50, 4: 40, 3: 30, 2: 20, 1: 10
 }
 
-def calculate_predicted_grade(mock_scores, coursework_score, teacher_assessment):
+def load_data():
+    """Load student data from JSON file"""
+    global students, student_id_counter
+    
+    if os.path.exists(DATA_FILE):
+        try:
+            with open(DATA_FILE, 'r') as f:
+                data = json.load(f)
+                students = {int(k): v for k, v in data.get('students', {}).items()}
+                student_id_counter = data.get('next_id', 1)
+        except Exception as e:
+            print(f"Error loading data: {e}")
+            students = {}
+            student_id_counter = 1
+
+def save_data():
+    """Save student data to JSON file"""
+    try:
+        data = {
+            'students': students,
+            'next_id': student_id_counter,
+            'last_updated': datetime.utcnow().isoformat()
+        }
+        with open(DATA_FILE, 'w') as f:
+            json.dump(data, f, indent=2)
+    except Exception as e:
+        print(f"Error saving data: {e}")
+
+def calculate_predicted_grade(mock_scores, coursework_score, teacher_assessment, grade_boundaries):
     """Calculate predicted GCSE grade based on multiple factors"""
     # Weight the different components
     mock_avg = sum(mock_scores) / len(mock_scores) if mock_scores else 0
@@ -26,14 +59,14 @@ def calculate_predicted_grade(mock_scores, coursework_score, teacher_assessment)
         weighted_score = (mock_avg * 0.6) + (teacher_assessment * 0.4)
     
     # Determine grade based on boundaries
-    for grade, boundary in GRADE_BOUNDARIES.items():
+    for grade, boundary in sorted(grade_boundaries.items(), reverse=True):
         if weighted_score >= boundary:
             return grade
     return 'U'  # Ungraded
 
-def calculate_progress(current_score, target_grade):
+def calculate_progress(current_score, target_grade, grade_boundaries):
     """Calculate how much progress is needed"""
-    target_score = GRADE_BOUNDARIES.get(target_grade, 0)
+    target_score = grade_boundaries.get(int(target_grade), 0)
     gap = target_score - current_score
     return {
         'gap': round(gap, 2),
@@ -115,6 +148,24 @@ HTML_TEMPLATE = """
             grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
             gap: 15px;
         }
+        .grade-boundaries {
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            gap: 10px;
+            margin-top: 10px;
+        }
+        .boundary-input {
+            display: flex;
+            align-items: center;
+            gap: 5px;
+        }
+        .boundary-input label {
+            margin: 0;
+            min-width: 60px;
+        }
+        .boundary-input input {
+            flex: 1;
+        }
         button {
             background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
             color: white;
@@ -130,6 +181,26 @@ HTML_TEMPLATE = """
         button:hover {
             transform: translateY(-2px);
             box-shadow: 0 5px 15px rgba(102, 126, 234, 0.4);
+        }
+        .toggle-btn {
+            background: #f8f9fa;
+            color: #667eea;
+            padding: 10px 20px;
+            font-size: 14px;
+            margin-bottom: 15px;
+        }
+        .toggle-btn:hover {
+            background: #e9ecef;
+        }
+        .custom-boundaries {
+            display: none;
+            padding: 20px;
+            background: #f8f9fa;
+            border-radius: 8px;
+            margin-top: 10px;
+        }
+        .custom-boundaries.show {
+            display: block;
         }
         .results {
             display: none;
@@ -217,6 +288,16 @@ HTML_TEMPLATE = """
             justify-content: space-between;
             align-items: center;
         }
+        .delete-btn {
+            background: #dc3545;
+            padding: 8px 16px;
+            font-size: 14px;
+            width: auto;
+            margin-left: 10px;
+        }
+        .delete-btn:hover {
+            background: #c82333;
+        }
     </style>
 </head>
 <body>
@@ -271,6 +352,53 @@ HTML_TEMPLATE = """
                     <input type="number" id="teacherAssessment" min="0" max="100" required>
                 </div>
                 
+                <div class="form-group">
+                    <button type="button" class="toggle-btn" onclick="toggleBoundaries()">
+                        📊 Customize Grade Boundaries (Optional)
+                    </button>
+                    <div class="custom-boundaries" id="customBoundaries">
+                        <label>Grade Boundaries (%):</label>
+                        <div class="grade-boundaries">
+                            <div class="boundary-input">
+                                <label>Grade 9:</label>
+                                <input type="number" id="boundary9" min="0" max="100" value="90">
+                            </div>
+                            <div class="boundary-input">
+                                <label>Grade 8:</label>
+                                <input type="number" id="boundary8" min="0" max="100" value="80">
+                            </div>
+                            <div class="boundary-input">
+                                <label>Grade 7:</label>
+                                <input type="number" id="boundary7" min="0" max="100" value="70">
+                            </div>
+                            <div class="boundary-input">
+                                <label>Grade 6:</label>
+                                <input type="number" id="boundary6" min="0" max="100" value="60">
+                            </div>
+                            <div class="boundary-input">
+                                <label>Grade 5:</label>
+                                <input type="number" id="boundary5" min="0" max="100" value="50">
+                            </div>
+                            <div class="boundary-input">
+                                <label>Grade 4:</label>
+                                <input type="number" id="boundary4" min="0" max="100" value="40">
+                            </div>
+                            <div class="boundary-input">
+                                <label>Grade 3:</label>
+                                <input type="number" id="boundary3" min="0" max="100" value="30">
+                            </div>
+                            <div class="boundary-input">
+                                <label>Grade 2:</label>
+                                <input type="number" id="boundary2" min="0" max="100" value="20">
+                            </div>
+                            <div class="boundary-input">
+                                <label>Grade 1:</label>
+                                <input type="number" id="boundary1" min="0" max="100" value="10">
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                
                 <button type="submit">Calculate Predicted Grade</button>
             </form>
         </div>
@@ -315,6 +443,11 @@ HTML_TEMPLATE = """
     </div>
     
     <script>
+        function toggleBoundaries() {
+            const boundaries = document.getElementById('customBoundaries');
+            boundaries.classList.toggle('show');
+        }
+        
         document.getElementById('gradeForm').addEventListener('submit', async (e) => {
             e.preventDefault();
             
@@ -326,6 +459,19 @@ HTML_TEMPLATE = """
             const mock3 = document.getElementById('mock3').value;
             if (mock3) mockScores.push(parseFloat(mock3));
             
+            // Get custom grade boundaries
+            const gradeBoundaries = {
+                9: parseFloat(document.getElementById('boundary9').value),
+                8: parseFloat(document.getElementById('boundary8').value),
+                7: parseFloat(document.getElementById('boundary7').value),
+                6: parseFloat(document.getElementById('boundary6').value),
+                5: parseFloat(document.getElementById('boundary5').value),
+                4: parseFloat(document.getElementById('boundary4').value),
+                3: parseFloat(document.getElementById('boundary3').value),
+                2: parseFloat(document.getElementById('boundary2').value),
+                1: parseFloat(document.getElementById('boundary1').value)
+            };
+            
             const data = {
                 name: document.getElementById('studentName').value,
                 subject: document.getElementById('subject').value,
@@ -333,7 +479,8 @@ HTML_TEMPLATE = """
                 mock_scores: mockScores,
                 coursework_score: document.getElementById('coursework').value ? 
                     parseFloat(document.getElementById('coursework').value) : null,
-                teacher_assessment: parseFloat(document.getElementById('teacherAssessment').value)
+                teacher_assessment: parseFloat(document.getElementById('teacherAssessment').value),
+                grade_boundaries: gradeBoundaries
             };
             
             try {
@@ -358,8 +505,9 @@ HTML_TEMPLATE = """
             document.getElementById('gapScore').textContent = Math.abs(data.progress.gap).toFixed(1);
             
             const progressBar = document.getElementById('progressBar');
-            progressBar.style.width = data.progress.percentage_complete + '%';
-            progressBar.textContent = data.progress.percentage_complete + '%';
+            const percentage = Math.min(100, Math.max(0, data.progress.percentage_complete));
+            progressBar.style.width = percentage + '%';
+            progressBar.textContent = percentage.toFixed(0) + '%';
             
             const badge = document.getElementById('trackingBadge');
             if (data.progress.on_track) {
@@ -390,13 +538,25 @@ HTML_TEMPLATE = """
                             <strong>${s.name}</strong> - ${s.subject}<br>
                             <small>Predicted: Grade ${s.predicted_grade} | Target: Grade ${s.target_grade}</small>
                         </div>
-                        <div style="text-align: right;">
-                            <div style="font-size: 1.5em; font-weight: bold; color: #667eea;">${s.predicted_grade}</div>
+                        <div style="display: flex; align-items: center;">
+                            <div style="font-size: 1.5em; font-weight: bold; color: #667eea; margin-right: 10px;">${s.predicted_grade}</div>
+                            <button class="delete-btn" onclick="deleteStudent(${s.id})">Delete</button>
                         </div>
                     </div>
                 `).join('');
             } catch (error) {
                 console.error('Error loading students:', error);
+            }
+        }
+        
+        async function deleteStudent(id) {
+            if (!confirm('Are you sure you want to delete this student?')) return;
+            
+            try {
+                await fetch(`/api/students/${id}`, { method: 'DELETE' });
+                loadStudents();
+            } catch (error) {
+                alert('Error deleting student: ' + error.message);
             }
         }
         
@@ -439,12 +599,15 @@ def create_student():
         if field not in data:
             return jsonify({'error': f'Missing required field: {field}'}), 400
     
+    # Get grade boundaries (use custom or default)
+    grade_boundaries = data.get('grade_boundaries', DEFAULT_GRADE_BOUNDARIES)
+    
     # Calculate predicted grade
     mock_scores = data['mock_scores']
     coursework = data.get('coursework_score')  # Optional field
     teacher_assessment = data['teacher_assessment']
     
-    predicted_grade = calculate_predicted_grade(mock_scores, coursework, teacher_assessment)
+    predicted_grade = calculate_predicted_grade(mock_scores, coursework, teacher_assessment, grade_boundaries)
     
     # Calculate weighted score for display
     mock_avg = sum(mock_scores) / len(mock_scores)
@@ -454,7 +617,7 @@ def create_student():
         weighted_score = (mock_avg * 0.6) + (teacher_assessment * 0.4)
     
     # Calculate progress
-    progress = calculate_progress(weighted_score, data['target_grade'])
+    progress = calculate_progress(weighted_score, data['target_grade'], grade_boundaries)
     
     student = {
         'id': student_id_counter,
@@ -464,6 +627,7 @@ def create_student():
         'mock_scores': mock_scores,
         'coursework_score': coursework,
         'teacher_assessment': teacher_assessment,
+        'grade_boundaries': grade_boundaries,
         'predicted_grade': predicted_grade,
         'weighted_score': weighted_score,
         'progress': progress,
@@ -472,6 +636,9 @@ def create_student():
     
     students[student_id_counter] = student
     student_id_counter += 1
+    
+    # Save to JSON file
+    save_data()
     
     return jsonify(student), 201
 
@@ -482,6 +649,10 @@ def delete_student(student_id):
         return jsonify({'error': 'Student not found'}), 404
     
     deleted = students.pop(student_id)
+    
+    # Save to JSON file
+    save_data()
+    
     return jsonify({'message': 'Student deleted', 'student': deleted}), 200
 
 @app.route('/health')
@@ -489,4 +660,6 @@ def health():
     return jsonify({'status': 'healthy', 'students_count': len(students)}), 200
 
 if __name__ == '__main__':
+    # Load existing data on startup
+    load_data()
     app.run(debug=True, host='0.0.0.0', port=5000)
