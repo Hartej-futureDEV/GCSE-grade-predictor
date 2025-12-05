@@ -17,7 +17,13 @@ def calculate_predicted_grade(mock_scores, coursework_score, teacher_assessment)
     """Calculate predicted GCSE grade based on multiple factors"""
     # Weight the different components
     mock_avg = sum(mock_scores) / len(mock_scores) if mock_scores else 0
-    weighted_score = (mock_avg * 0.5) + (coursework_score * 0.3) + (teacher_assessment * 0.2)
+    
+    # Adjust weights if coursework is not provided
+    if coursework_score is not None:
+        weighted_score = (mock_avg * 0.5) + (coursework_score * 0.3) + (teacher_assessment * 0.2)
+    else:
+        # Redistribute weight: 60% mocks, 40% teacher assessment
+        weighted_score = (mock_avg * 0.6) + (teacher_assessment * 0.4)
     
     # Determine grade based on boundaries
     for grade, boundary in GRADE_BOUNDARIES.items():
@@ -256,8 +262,8 @@ HTML_TEMPLATE = """
                 </div>
                 
                 <div class="form-group">
-                    <label for="coursework">Coursework Score (%):</label>
-                    <input type="number" id="coursework" min="0" max="100" required>
+                    <label for="coursework">Coursework Score (%) <em style="color: #999;">(optional)</em>:</label>
+                    <input type="number" id="coursework" min="0" max="100">
                 </div>
                 
                 <div class="form-group">
@@ -325,7 +331,8 @@ HTML_TEMPLATE = """
                 subject: document.getElementById('subject').value,
                 target_grade: parseInt(document.getElementById('targetGrade').value),
                 mock_scores: mockScores,
-                coursework_score: parseFloat(document.getElementById('coursework').value),
+                coursework_score: document.getElementById('coursework').value ? 
+                    parseFloat(document.getElementById('coursework').value) : null,
                 teacher_assessment: parseFloat(document.getElementById('teacherAssessment').value)
             };
             
@@ -427,21 +434,24 @@ def create_student():
     data = request.get_json()
     
     # Validate required fields
-    required_fields = ['name', 'subject', 'target_grade', 'mock_scores', 'coursework_score', 'teacher_assessment']
+    required_fields = ['name', 'subject', 'target_grade', 'mock_scores', 'teacher_assessment']
     for field in required_fields:
         if field not in data:
             return jsonify({'error': f'Missing required field: {field}'}), 400
     
     # Calculate predicted grade
     mock_scores = data['mock_scores']
-    coursework = data['coursework_score']
+    coursework = data.get('coursework_score')  # Optional field
     teacher_assessment = data['teacher_assessment']
     
     predicted_grade = calculate_predicted_grade(mock_scores, coursework, teacher_assessment)
     
     # Calculate weighted score for display
     mock_avg = sum(mock_scores) / len(mock_scores)
-    weighted_score = (mock_avg * 0.5) + (coursework * 0.3) + (teacher_assessment * 0.2)
+    if coursework is not None:
+        weighted_score = (mock_avg * 0.5) + (coursework * 0.3) + (teacher_assessment * 0.2)
+    else:
+        weighted_score = (mock_avg * 0.6) + (teacher_assessment * 0.4)
     
     # Calculate progress
     progress = calculate_progress(weighted_score, data['target_grade'])
